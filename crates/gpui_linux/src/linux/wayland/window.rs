@@ -465,6 +465,20 @@ impl WaylandSurfaceState {
         }
     }
 
+    fn set_keyboard_interactivity(
+        &self,
+        interactivity: zwlr_layer_surface_v1::KeyboardInteractivity,
+    ) -> bool {
+        if let WaylandSurfaceState::LayerShell(WaylandLayerSurfaceState { layer_surface, .. }) =
+            self
+        {
+            layer_surface.set_keyboard_interactivity(interactivity);
+            true
+        } else {
+            false
+        }
+    }
+
     fn set_exclusive_zone(&self, zone: i32) -> bool {
         if let WaylandSurfaceState::LayerShell(WaylandLayerSurfaceState { layer_surface, .. }) =
             self
@@ -2117,6 +2131,15 @@ impl PlatformWindow for WaylandWindow {
                 state.client.get_serial(SerialKind::MousePress).as_raw(),
                 edge.to_xdg(),
             )
+        }
+    }
+
+    fn set_keyboard_interactivity(&self, interactivity: gpui::layer_shell::KeyboardInteractivity) {
+        let state = self.borrow();
+        if state.surface_state.set_keyboard_interactivity(
+            super::layer_shell::wayland_keyboard_interactivity(interactivity),
+        ) {
+            state.surface.commit();
         }
     }
 

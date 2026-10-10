@@ -2493,6 +2493,16 @@ impl Window {
         self.platform_window.set_exclusive_zone(zone);
     }
 
+    /// Set how a layer-shell surface takes keyboard focus. (Wayland layer-shell windows only)
+    #[cfg(all(target_os = "linux", feature = "wayland"))]
+    pub fn set_keyboard_interactivity(
+        &self,
+        interactivity: crate::layer_shell::KeyboardInteractivity,
+    ) {
+        self.platform_window
+            .set_keyboard_interactivity(interactivity);
+    }
+
     /// Set which anchored edge a layer-shell surface's exclusive zone applies to.
     /// This is only needed to disambiguate a corner-anchored surface; otherwise the
     /// edge is deduced from the anchor. The edge must be a single edge the surface
