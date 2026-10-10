@@ -1873,7 +1873,13 @@ impl PlatformWindow for WaylandWindow {
         }
     }
 
-    fn request_attention(&self) {}
+    fn request_attention(&self) {
+        // Wayland has no attention request; compositors show an activation request without
+        // recent user input as one.
+        if !self.borrow().active {
+            self.activate();
+        }
+    }
 
     fn is_active(&self) -> bool {
         self.borrow().active
