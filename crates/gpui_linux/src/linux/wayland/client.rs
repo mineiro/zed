@@ -517,6 +517,7 @@ pub(crate) struct ExternalDrag {
     source: wl_data_source::WlDataSource,
     bytes: Vec<u8>,
     window: WaylandWindowStatePtr,
+    icon: Option<super::drag_icon::DragIcon>,
 }
 
 fn file_uri_list(paths: &FileDragPaths) -> String {
@@ -661,6 +662,7 @@ impl WaylandClientStatePtr {
         &self,
         surface: &wl_surface::WlSurface,
         payload: &ExternalDragPayload,
+        scale: i32,
     ) -> bool {
         let client = self.get_client();
         let mut state = client.borrow_mut();
@@ -687,12 +689,28 @@ impl WaylandClientStatePtr {
             data_device_manager.create_data_source(&state.globals.qh, DataSourceKind::Drag);
         source.offer(FILE_LIST_MIME_TYPE.to_string());
         source.set_actions(DndAction::Copy | DndAction::Move);
-        data_device.start_drag(Some(&source), surface, None, serial.as_raw());
+        let icon = super::drag_icon::create(
+            &state.globals,
+            &state.globals.qh,
+            paths.entries().len(),
+            scale,
+        );
+        data_device.start_drag(
+            Some(&source),
+            surface,
+            icon.as_ref().map(|(icon, _)| &icon.surface),
+            serial.as_raw(),
+        );
+        let icon = icon.map(|(icon, buffer)| {
+            buffer.attach(&icon.surface);
+            icon
+        });
 
         state.external_drag = Some(ExternalDrag {
             source,
             bytes: uri_list.into_bytes(),
             window,
+            icon,
         });
         true
     }
@@ -3061,10 +3079,13 @@ impl Dispatch<wl_data_source::WlDataSource, DataSourceKind> for WaylandClientSta
                 DataSourceKind::Drag,
                 wl_data_source::Event::DndFinished | wl_data_source::Event::Cancelled,
             ) => {
-                let Some(external_drag) = state.external_drag.take() else {
+                let Some(mut external_drag) = state.external_drag.take() else {
                     return;
                 };
                 external_drag.source.destroy();
+                if let Some(icon) = external_drag.icon.take() {
+                    icon.destroy();
+                }
 
                 let input = PlatformInput::FileDrop(FileDropEvent::Ended);
                 drop(state);
