@@ -5666,6 +5666,7 @@ impl Window {
                             cursor_offset: position,
                             cursor_style: None,
                             external_payload_source: None,
+                            external_at_once: false,
                         });
                     }
                     PlatformInput::MouseMove(MouseMoveEvent {
@@ -5767,7 +5768,13 @@ impl Window {
         if mouse_move.pressed_button != Some(MouseButton::Left) {
             return;
         }
-        if Bounds::new(Point::default(), self.viewport_size).contains(&mouse_move.position) {
+        let at_once = cx
+            .active_drag
+            .as_ref()
+            .is_some_and(|drag| drag.external_at_once);
+        if !at_once
+            && Bounds::new(Point::default(), self.viewport_size).contains(&mouse_move.position)
+        {
             return;
         }
         if !self.platform_window.can_start_external_drag() {
@@ -7878,6 +7885,7 @@ mod tests {
         time::Duration,
     };
 
+    use crate::prelude::FluentBuilder as _;
     use crate::{
         AnyWindowHandle, AppContext as _, Bounds, ContentMask, Context, DispatchPhase,
         DragMoveEvent, Empty, ExternalDragPayload, ExternalPaths, FileDragPaths, FileDropEvent,
@@ -8652,6 +8660,7 @@ mod tests {
 
     struct FileDragView {
         path: PathBuf,
+        external_at_once: bool,
         observed_drag_moves: Rc<RefCell<Vec<Point<Pixels>>>>,
         observed_drops: Rc<RefCell<Vec<PathBuf>>>,
     }
@@ -8679,6 +8688,7 @@ mod tests {
                         true,
                     )])))
                 })
+                .when(self.external_at_once, |this| this.external_drag_at_once())
                 .on_drag_move({
                     let observed_drag_moves = self.observed_drag_moves.clone();
                     move |event: &DragMoveEvent<PathBuf>, _, _| {
@@ -8690,6 +8700,53 @@ mod tests {
                     move |path: &PathBuf, _, _| observed_drops.borrow_mut().push(path.clone())
                 })
         }
+    }
+
+    #[gpui::test]
+    fn file_drag_at_once_is_promoted_inside_the_window(cx: &mut TestAppContext) {
+        let path = PathBuf::from("/tmp/at-once-drag");
+        let window: AnyWindowHandle = cx
+            .add_window({
+                let path = path.clone();
+                move |_, _| FileDragView {
+                    path,
+                    external_at_once: true,
+                    observed_drag_moves: Rc::default(),
+                    observed_drops: Rc::default(),
+                }
+            })
+            .into();
+        cx.test_window(window).set_start_external_drag_result(true);
+
+        let update_result = cx.update_window(window, |_, window, cx| {
+            window.draw(cx).clear(cx);
+            window.dispatch_event(
+                MouseDownEvent {
+                    position: point(px(10.), px(10.)),
+                    button: MouseButton::Left,
+                    modifiers: Default::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                }
+                .to_platform_input(),
+                cx,
+            );
+            window.dispatch_event(
+                MouseMoveEvent {
+                    position: point(px(20.), px(20.)),
+                    pressed_button: Some(MouseButton::Left),
+                    modifiers: Default::default(),
+                }
+                .to_platform_input(),
+                cx,
+            );
+            assert!(cx.active_drag.is_none());
+        });
+        assert!(
+            update_result.is_ok(),
+            "failed to start drag: {update_result:?}"
+        );
+        assert_eq!(cx.test_window(window).external_drag_files(), [(path, true)]);
     }
 
     #[gpui::test]
@@ -8709,6 +8766,7 @@ mod tests {
                     let observed_drops = observed_drops.clone();
                     move |_, _| FileDragView {
                         path,
+                        external_at_once: false,
                         observed_drag_moves,
                         observed_drops,
                     }

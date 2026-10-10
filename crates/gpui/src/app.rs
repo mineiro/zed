@@ -3435,6 +3435,10 @@ pub struct AnyDrag {
     /// Resolves the payload to offer the platform if the drag leaves the window.
     /// Invoked at most once per drag gesture, at promotion time.
     pub external_payload_source: Option<ExternalDragPayloadSource>,
+
+    /// Whether the drag goes to the platform as soon as it starts, rather than when the
+    /// pointer leaves the window.
+    pub external_at_once: bool,
 }
 
 /// Lazily resolves the payload handed to the platform when an internal drag is
