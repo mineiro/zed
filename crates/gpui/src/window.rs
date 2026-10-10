@@ -5666,6 +5666,7 @@ impl Window {
                             cursor_offset: position,
                             cursor_style: None,
                             external_payload_source: None,
+                            external_at_once: false,
                         });
                     }
                     PlatformInput::MouseMove(MouseMoveEvent {
@@ -5767,7 +5768,13 @@ impl Window {
         if mouse_move.pressed_button != Some(MouseButton::Left) {
             return;
         }
-        if Bounds::new(Point::default(), self.viewport_size).contains(&mouse_move.position) {
+        let at_once = cx
+            .active_drag
+            .as_ref()
+            .is_some_and(|drag| drag.external_at_once);
+        if !at_once
+            && Bounds::new(Point::default(), self.viewport_size).contains(&mouse_move.position)
+        {
             return;
         }
         if !self.platform_window.can_start_external_drag() {
