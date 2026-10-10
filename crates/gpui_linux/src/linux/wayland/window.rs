@@ -1873,7 +1873,14 @@ impl PlatformWindow for WaylandWindow {
         }
     }
 
-    fn request_attention(&self) {}
+    fn request_attention(&self) {
+        // Wayland has no attention request of its own; an activation request
+        // made without the user's recent input is what compositors show as
+        // one (Hyprland marks the window urgent, KWin and Mutter flash it).
+        if !self.borrow().active {
+            self.activate();
+        }
+    }
 
     fn is_active(&self) -> bool {
         self.borrow().active
