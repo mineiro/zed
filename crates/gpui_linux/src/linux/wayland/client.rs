@@ -1,8 +1,9 @@
 use std::{
     cell::{RefCell, RefMut},
     hash::Hash,
+    io::Write as _,
     os::{
-        fd::{AsRawFd, BorrowedFd, FromRawFd as _, RawFd},
+        fd::{AsRawFd, BorrowedFd, FromRawFd as _, OwnedFd, RawFd},
         unix::net::UnixStream,
     },
     path::PathBuf,
@@ -12,6 +13,7 @@ use std::{
 
 use anyhow::Context as _;
 use ashpd::WindowIdentifier;
+use ashpd::documents::file_transfer::{FileTransfer, StartTransferOptions};
 use calloop::{
     LoopHandle, RegistrationToken,
     ping::Ping,
@@ -90,7 +92,9 @@ use crate::linux::{
     keystroke_from_xkb, keystroke_underlying_dead_key, modifiers_from_xkb, new_xkb_context,
     open_uri_internal, read_fd_with_timeout, reveal_path_internal,
     wayland::{
-        clipboard::{Clipboard, DataOffer, FILE_LIST_MIME_TYPE, TEXT_MIME_TYPES},
+        clipboard::{
+            Clipboard, DataOffer, FILE_LIST_MIME_TYPE, FILE_TRANSFER_MIME_TYPE, TEXT_MIME_TYPES,
+        },
         cursor::Cursor,
         serial::{Serial, SerialKind, SerialTracker},
         to_shape,
@@ -516,6 +520,7 @@ pub(crate) enum DataSourceKind {
 pub(crate) struct ExternalDrag {
     source: wl_data_source::WlDataSource,
     bytes: Vec<u8>,
+    entries: Vec<(PathBuf, bool)>,
     window: WaylandWindowStatePtr,
     icon: Option<super::drag_icon::DragIcon>,
 }
@@ -530,6 +535,32 @@ fn file_uri_list(paths: &FileDragPaths) -> String {
             list.push_str("\r\n");
             list
         })
+}
+
+// Sandboxed apps can't open the host paths in the URI list, so the files are
+// exported to them through the document portal and the target receives the key.
+fn send_file_transfer_key(entries: Vec<(PathBuf, bool)>, fd: OwnedFd) {
+    std::thread::spawn(move || {
+        smol::block_on(async move {
+            let files = entries
+                .iter()
+                .filter(|(_, is_dir)| !is_dir)
+                .map(|(path, _)| std::fs::File::open(path))
+                .collect::<std::io::Result<Vec<_>>>()?;
+            let portal = FileTransfer::new().await?;
+            let key = portal
+                .start_transfer(
+                    StartTransferOptions::default()
+                        .set_writeable(false)
+                        .set_auto_stop(true),
+                )
+                .await?;
+            portal.add_files(&key, &files, Default::default()).await?;
+            std::fs::File::from(fd).write_all(key.as_bytes())?;
+            anyhow::Ok(())
+        })
+        .log_err();
+    });
 }
 
 pub struct ClickState {
@@ -688,6 +719,9 @@ impl WaylandClientStatePtr {
         let source =
             data_device_manager.create_data_source(&state.globals.qh, DataSourceKind::Drag);
         source.offer(FILE_LIST_MIME_TYPE.to_string());
+        if paths.entries().iter().any(|(_, is_dir)| !is_dir) {
+            source.offer(FILE_TRANSFER_MIME_TYPE.to_string());
+        }
         source.set_actions(DndAction::Copy | DndAction::Move);
         let icon = super::drag_icon::create(
             &state.globals,
@@ -709,6 +743,7 @@ impl WaylandClientStatePtr {
         state.external_drag = Some(ExternalDrag {
             source,
             bytes: uri_list.into_bytes(),
+            entries: paths.entries().to_vec(),
             window,
             icon,
         });
@@ -3068,10 +3103,14 @@ impl Dispatch<wl_data_source::WlDataSource, DataSourceKind> for WaylandClientSta
             (DataSourceKind::Clipboard, wl_data_source::Event::Cancelled) => {
                 data_source.destroy();
             }
-            (DataSourceKind::Drag, wl_data_source::Event::Send { fd, .. }) => {
+            (DataSourceKind::Drag, wl_data_source::Event::Send { mime_type, fd }) => {
                 let Some(external_drag) = state.external_drag.as_ref() else {
                     return;
                 };
+                if mime_type == FILE_TRANSFER_MIME_TYPE {
+                    send_file_transfer_key(external_drag.entries.clone(), fd);
+                    return;
+                }
                 let bytes = external_drag.bytes.clone();
                 state.clipboard.send_bytes(fd, bytes);
             }

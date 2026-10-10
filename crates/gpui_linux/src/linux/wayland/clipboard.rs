@@ -17,6 +17,7 @@ use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat, hash};
 pub(crate) const TEXT_MIME_TYPES: [&str; 3] =
     ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain"];
 pub(crate) const FILE_LIST_MIME_TYPE: &str = "text/uri-list";
+pub(crate) const FILE_TRANSFER_MIME_TYPE: &str = "application/vnd.portal.filetransfer";
 
 /// Text mime types that we'll accept from other programs.
 pub(crate) const ALLOWED_TEXT_MIME_TYPES: [&str; 2] = ["text/plain;charset=utf-8", "UTF8_STRING"];
