@@ -2889,6 +2889,11 @@ impl App {
         self.active_drag.is_some()
     }
 
+    /// Whether a drag this app handed to the platform has yet to be dropped or cancelled.
+    pub fn has_platform_drag(&self) -> bool {
+        self.platform_owned_drag.is_some()
+    }
+
     /// Gets the cursor style of the currently active drag operation.
     pub fn active_drag_cursor_style(&self) -> Option<CursorStyle> {
         self.active_drag.as_ref().and_then(|drag| drag.cursor_style)
