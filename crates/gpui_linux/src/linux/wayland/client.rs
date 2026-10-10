@@ -662,6 +662,7 @@ impl WaylandClientStatePtr {
         &self,
         surface: &wl_surface::WlSurface,
         payload: &ExternalDragPayload,
+        scale: i32,
     ) -> bool {
         let client = self.get_client();
         let mut state = client.borrow_mut();
@@ -689,7 +690,6 @@ impl WaylandClientStatePtr {
         source.offer(FILE_LIST_MIME_TYPE.to_string());
         source.set_actions(DndAction::Copy | DndAction::Move);
         // A page (or a small stack) under the pointer for as long as the drag lasts.
-        let scale = window.primary_output_scale();
         let icon = super::drag_icon::create(
             &state.globals,
             &state.globals.qh,

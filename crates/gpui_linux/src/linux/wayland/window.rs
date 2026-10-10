@@ -2095,8 +2095,13 @@ impl PlatformWindow for WaylandWindow {
     }
 
     fn start_external_drag(&self, payload: &ExternalDragPayload) -> bool {
+        // Read before the shared borrow below: the scale needs the window's
+        // state mutably, and asking for it while borrowed panics.
+        let scale = self.0.primary_output_scale();
         let state = self.borrow();
-        state.client.start_external_drag(&state.surface, payload)
+        state
+            .client
+            .start_external_drag(&state.surface, payload, scale)
     }
 
     fn start_window_resize(&self, edge: gpui::ResizeEdge) {
