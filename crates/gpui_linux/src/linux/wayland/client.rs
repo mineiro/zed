@@ -516,6 +516,8 @@ pub(crate) enum DataSourceKind {
 pub(crate) struct ExternalDrag {
     source: wl_data_source::WlDataSource,
     bytes: Vec<u8>,
+    /// The dragged entries, for a sandboxed target's portal file transfer.
+    entries: Vec<(std::path::PathBuf, bool)>,
     window: WaylandWindowStatePtr,
     icon: Option<super::drag_icon::DragIcon>,
 }
@@ -688,6 +690,9 @@ impl WaylandClientStatePtr {
         let source =
             data_device_manager.create_data_source(&state.globals.qh, DataSourceKind::Drag);
         source.offer(FILE_LIST_MIME_TYPE.to_string());
+        if super::file_transfer::offers(paths.entries()) {
+            source.offer(super::file_transfer::MIME_TYPE.to_string());
+        }
         source.set_actions(DndAction::Copy | DndAction::Move);
         // A page (or a small stack) under the pointer for as long as the drag lasts.
         let icon = super::drag_icon::create(
@@ -710,6 +715,7 @@ impl WaylandClientStatePtr {
         state.external_drag = Some(ExternalDrag {
             source,
             bytes: uri_list.into_bytes(),
+            entries: paths.entries().to_vec(),
             window,
             icon,
         });
@@ -3069,10 +3075,14 @@ impl Dispatch<wl_data_source::WlDataSource, DataSourceKind> for WaylandClientSta
             (DataSourceKind::Clipboard, wl_data_source::Event::Cancelled) => {
                 data_source.destroy();
             }
-            (DataSourceKind::Drag, wl_data_source::Event::Send { fd, .. }) => {
+            (DataSourceKind::Drag, wl_data_source::Event::Send { mime_type, fd }) => {
                 let Some(external_drag) = state.external_drag.as_ref() else {
                     return;
                 };
+                if mime_type == super::file_transfer::MIME_TYPE {
+                    super::file_transfer::send(external_drag.entries.clone(), fd);
+                    return;
+                }
                 let bytes = external_drag.bytes.clone();
                 state.clipboard.send_bytes(fd, bytes);
             }

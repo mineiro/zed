@@ -535,6 +535,7 @@ anyhow = "1.0.86"
 arc-swap = "1.9.0"
 ashpd = { version = "0.13", default-features = false, features = [
     "async-io",
+    "documents",
     "inhibit",
     "open_uri",
     "file_chooser",

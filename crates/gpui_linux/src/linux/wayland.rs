@@ -3,6 +3,7 @@ mod clipboard;
 mod cursor;
 mod display;
 mod drag_icon;
+mod file_transfer;
 mod popup;
 mod serial;
 mod window;
