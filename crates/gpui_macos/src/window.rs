@@ -2528,7 +2528,7 @@ extern "C" fn reset_cursor_rects(this: &Object, _: Sel) {
         let window_state = get_window_state(this);
         let cursor_style = window_state.lock().cursor_style;
 
-        let cursor: id = match cursor_style {
+        let cursor: id = match cursor_style.standard() {
             CursorStyle::Arrow => msg_send![class!(NSCursor), arrowCursor],
             CursorStyle::IBeam => msg_send![class!(NSCursor), IBeamCursor],
             CursorStyle::Crosshair => msg_send![class!(NSCursor), crosshairCursor],
@@ -2562,6 +2562,8 @@ extern "C" fn reset_cursor_rects(this: &Object, _: Sel) {
             CursorStyle::DragLink => msg_send![class!(NSCursor), dragLinkCursor],
             CursorStyle::DragCopy => msg_send![class!(NSCursor), dragCopyCursor],
             CursorStyle::ContextualMenu => msg_send![class!(NSCursor), contextualMenuCursor],
+            // `standard()` above leaves no custom cursor to show here.
+            CursorStyle::Custom(_) => msg_send![class!(NSCursor), arrowCursor],
         };
 
         let bounds = NSView::bounds(this as *const Object as id);

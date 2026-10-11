@@ -2964,6 +2964,78 @@ pub enum CursorStyle {
     /// A cursor indicating that the operation will result in a context menu
     /// corresponds to the CSS cursor value `context-menu`
     ContextualMenu,
+
+    /// An image the application registered with [`CustomCursor::register`].
+    /// Platforms that can't show images show its fallback style instead.
+    Custom(CustomCursor),
+}
+
+impl CursorStyle {
+    /// This style, or for a custom cursor its fallback: always one of the
+    /// platform's named cursors.
+    pub fn standard(self) -> CursorStyle {
+        match self {
+            CursorStyle::Custom(cursor) => cursor.fallback(),
+            style => style,
+        }
+    }
+}
+
+/// A cursor image: straight (not premultiplied) RGBA pixels drawn at
+/// `scale` pixels per logical pixel, with its hotspot in logical pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CursorImage {
+    /// `width × height` pixels, four bytes each: red, green, blue, alpha.
+    pub rgba: Vec<u8>,
+    /// Width in pixels.
+    pub width: u32,
+    /// Height in pixels.
+    pub height: u32,
+    /// Pixels per logical pixel the image was drawn at (2 for a 24-pixel
+    /// cursor drawn 48 pixels wide). At least 1.
+    pub scale: u32,
+    /// The point that clicks, in logical pixels from the top-left corner.
+    pub hotspot: (u32, u32),
+    /// The named cursor to show where images can't be shown. A custom
+    /// fallback is treated as [`CursorStyle::Arrow`].
+    pub fallback: CursorStyle,
+}
+
+/// A registered [`CursorImage`], cheap to copy into a [`CursorStyle`].
+/// Registrations live for the rest of the process.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+pub struct CustomCursor(u32);
+
+static CUSTOM_CURSORS: std::sync::RwLock<Vec<Arc<CursorImage>>> =
+    std::sync::RwLock::new(Vec::new());
+
+impl CustomCursor {
+    /// Registers `image`, returning the handle to show it with.
+    pub fn register(mut image: CursorImage) -> Self {
+        image.scale = image.scale.max(1);
+        if matches!(image.fallback, CursorStyle::Custom(_)) {
+            image.fallback = CursorStyle::Arrow;
+        }
+        let mut cursors = CUSTOM_CURSORS
+            .write()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cursors.push(Arc::new(image));
+        CustomCursor(cursors.len() as u32 - 1)
+    }
+
+    /// The registered image.
+    pub fn image(self) -> Option<Arc<CursorImage>> {
+        let cursors = CUSTOM_CURSORS
+            .read()
+            .unwrap_or_else(|poison| poison.into_inner());
+        cursors.get(self.0 as usize).cloned()
+    }
+
+    /// The named cursor shown where this image can't be.
+    pub fn fallback(self) -> CursorStyle {
+        self.image()
+            .map_or(CursorStyle::Arrow, |image| image.fallback)
+    }
 }
 
 /// A clipboard item that should be copied to the clipboard
@@ -3832,5 +3904,37 @@ mod tests {
     #[test]
     fn test_window_button_layout_parse_all_invalid() {
         assert!(WindowButtonLayout::parse("asdfghjkl").is_err());
+    }
+}
+
+#[cfg(test)]
+mod custom_cursor_tests {
+    use super::*;
+
+    #[test]
+    fn custom_cursors_register_and_fall_back() {
+        let image = |fallback| CursorImage {
+            rgba: vec![0; 4 * 4 * 4],
+            width: 4,
+            height: 4,
+            scale: 0,
+            hotspot: (1, 1),
+            fallback,
+        };
+        let rotate = CustomCursor::register(image(CursorStyle::Crosshair));
+        assert_eq!(
+            rotate.image().map(|image| image.scale),
+            Some(1),
+            "scale is at least 1"
+        );
+        assert_eq!(
+            CursorStyle::Custom(rotate).standard(),
+            CursorStyle::Crosshair
+        );
+        assert_eq!(CursorStyle::IBeam.standard(), CursorStyle::IBeam);
+        // A custom fallback would never resolve; it becomes the arrow.
+        let odd = CustomCursor::register(image(CursorStyle::Custom(rotate)));
+        assert_eq!(odd.fallback(), CursorStyle::Arrow);
+        assert_ne!(rotate, odd);
     }
 }

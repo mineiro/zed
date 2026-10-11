@@ -895,17 +895,6 @@ impl WaylandClientState {
             return;
         };
         let serial = self.serial_tracker.get(SerialKind::MouseEnter);
-        if let Some(cursor_shape_device) = &self.cursor_shape_device {
-            cursor_shape_device.set_shape(serial.as_raw(), to_shape(style));
-            return;
-        }
-        let Some(focused_window) = self.mouse_focused_window.clone() else {
-            log::warn!(
-                "wayland: no focused surface to restore cursor style {:?} after hide; cursor may stay invisible",
-                style
-            );
-            return;
-        };
         let Some(wl_pointer) = self.wl_pointer.clone() else {
             log::warn!(
                 "wayland: no wl_pointer to restore cursor style {:?} after hide; cursor may stay invisible",
@@ -913,13 +902,41 @@ impl WaylandClientState {
             );
             return;
         };
-        let scale = focused_window.primary_output_scale();
-        self.cursor.set_icon(
-            &wl_pointer,
-            serial.as_raw(),
-            cursor_style_to_icon_names(style),
-            scale,
-        );
+        let scale = self
+            .mouse_focused_window
+            .as_ref()
+            .map(|window| window.primary_output_scale());
+        if self.cursor_shape_device.is_none() && scale.is_none() {
+            log::warn!(
+                "wayland: no focused surface to restore cursor style {:?} after hide; cursor may stay invisible",
+                style
+            );
+            return;
+        }
+        self.show_cursor(&wl_pointer, serial.as_raw(), style, scale.unwrap_or(1));
+    }
+
+    /// Puts `style` on the pointer: an application's image on our cursor
+    /// surface, else the compositor's named shape, else the theme's image.
+    fn show_cursor(
+        &mut self,
+        wl_pointer: &wl_pointer::WlPointer,
+        serial: u32,
+        style: CursorStyle,
+        scale: i32,
+    ) {
+        if let CursorStyle::Custom(custom) = style
+            && self.cursor.set_image(wl_pointer, serial, custom)
+        {
+            return;
+        }
+        let style = style.standard();
+        if let Some(cursor_shape_device) = &self.cursor_shape_device {
+            cursor_shape_device.set_shape(serial, to_shape(style));
+        } else {
+            self.cursor
+                .set_icon(wl_pointer, serial, cursor_style_to_icon_names(style), scale);
+        }
     }
 }
 
@@ -1420,22 +1437,18 @@ impl WaylandConnection {
         }
 
         let serial = state.serial_tracker.get(SerialKind::MouseEnter);
-        if let Some(cursor_shape_device) = &state.cursor_shape_device {
-            cursor_shape_device.set_shape(serial.as_raw(), to_shape(style));
-        } else if let Some(focused_window) = &state.mouse_focused_window {
-            // cursor-shape-v1 isn't supported, set the cursor using a surface.
-            let wl_pointer = state
-                .wl_pointer
-                .clone()
-                .expect("window is focused by pointer");
-            let scale = focused_window.primary_output_scale();
-            state.cursor.set_icon(
-                &wl_pointer,
-                serial.as_raw(),
-                cursor_style_to_icon_names(style),
-                scale,
-            );
+        let scale = state
+            .mouse_focused_window
+            .as_ref()
+            .map(|window| window.primary_output_scale());
+        // Without cursor-shape-v1, a cursor surface needs a focused window.
+        if state.cursor_shape_device.is_none() && scale.is_none() {
+            return;
         }
+        let Some(wl_pointer) = state.wl_pointer.clone() else {
+            return;
+        };
+        state.show_cursor(&wl_pointer, serial.as_raw(), style, scale.unwrap_or(1));
     }
 
     pub(crate) fn hide_cursor_until_mouse_moves(&self) {
@@ -2460,17 +2473,8 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                     }
                     state.restore_cursor_after_hide();
                     if let Some(style) = state.cursor_style {
-                        if let Some(cursor_shape_device) = &state.cursor_shape_device {
-                            cursor_shape_device.set_shape(serial, to_shape(style));
-                        } else {
-                            let scale = window.primary_output_scale();
-                            state.cursor.set_icon(
-                                wl_pointer,
-                                serial,
-                                cursor_style_to_icon_names(style),
-                                scale,
-                            );
-                        }
+                        let scale = window.primary_output_scale();
+                        state.show_cursor(wl_pointer, serial, style, scale);
                     }
                     let modifiers = state.modifiers;
                     drop(state);
@@ -2519,23 +2523,12 @@ impl Dispatch<wl_pointer::WlPointer, ()> for WaylandClientStatePtr {
                             let serial = state.serial_tracker.get(SerialKind::MouseEnter);
                             state.cursor_style = Some(default_style);
 
-                            if let Some(cursor_shape_device) = &state.cursor_shape_device {
-                                cursor_shape_device
-                                    .set_shape(serial.as_raw(), to_shape(default_style));
-                            } else {
-                                // cursor-shape-v1 isn't supported, set the cursor using a surface.
-                                let wl_pointer = state
-                                    .wl_pointer
-                                    .clone()
-                                    .expect("window is focused by pointer");
-                                let scale = window.primary_output_scale();
-                                state.cursor.set_icon(
-                                    &wl_pointer,
-                                    serial.as_raw(),
-                                    cursor_style_to_icon_names(default_style),
-                                    scale,
-                                );
-                            }
+                            let wl_pointer = state
+                                .wl_pointer
+                                .clone()
+                                .expect("window is focused by pointer");
+                            let scale = window.primary_output_scale();
+                            state.show_cursor(&wl_pointer, serial.as_raw(), default_style, scale);
                         }
                     }
                     if state
