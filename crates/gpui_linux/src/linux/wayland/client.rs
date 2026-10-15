@@ -1071,7 +1071,11 @@ impl WaylandConnection {
         globals.contents().with_list(|list| -> anyhow::Result<()> {
             for global in list {
                 match &global.interface[..] {
-                    "wl_seat" => {
+                    // Keep the first seat. A compositor can advertise more
+                    // than one (Hyprland plugins add virtual seats for agents),
+                    // and binding each in turn left the app on the last one,
+                    // deaf to the user's own keyboard.
+                    "wl_seat" if seat.is_none() => {
                         seat = Some(globals.registry().bind::<wl_seat::WlSeat, _, _>(
                             global.name,
                             wl_seat_version(global.version)?,
@@ -1670,18 +1674,10 @@ impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for WaylandClientStat
                 version,
             } => match &interface[..] {
                 "wl_seat" => {
-                    let Ok(version) = wl_seat_version(version) else {
-                        log::error!("ignoring wl_seat below the required version");
-                        return;
-                    };
-                    if let Some(wl_pointer) = state.wl_pointer.take() {
-                        wl_pointer.release();
-                    }
-                    if let Some(wl_keyboard) = state.wl_keyboard.take() {
-                        wl_keyboard.release();
-                    }
-                    state.wl_seat.release();
-                    state.wl_seat = registry.bind::<wl_seat::WlSeat, _, _>(name, version, qh, ());
+                    // A seat that appears later is another seat, not a
+                    // replacement for the user's: keep the one bound at start.
+                    log::debug!("ignoring additional wl_seat global {name}");
+                    let _ = version;
                 }
                 "wl_output" => {
                     let Ok(version) = wl_output_version(version) else {
